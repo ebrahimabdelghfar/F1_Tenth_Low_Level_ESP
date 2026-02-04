@@ -1,0 +1,4 @@
+#ifndef __BRUSHLESS_CONTROL_H__
+#define __BRUSHLESS_CONTROL_H__
+
+#endif // __BRUSHLESS_CONTROL_H__
