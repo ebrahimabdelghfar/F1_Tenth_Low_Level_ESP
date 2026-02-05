@@ -8,36 +8,40 @@
 #include <rmw_microros/rmw_microros.h>
 #include <rcl/error_handling.h>
 
-// Publisher for steering angle feedback
+// ============== FreeRTOS Task Handles ==============
+TaskHandle_t controlTaskHandle = NULL;
+
+// ============== Publisher for steering angle feedback ==============
 rcl_publisher_t steering_angle_publisher;
 
-// Subscribers
+// ============== Subscribers ==============
 rcl_subscription_t steering_command_subscriber;
 rcl_subscription_t throttle_subscriber;
 
-// Core ROS structures
+// ============== Core ROS structures ==============
 rclc_support_t support;
 rcl_allocator_t allocator;
 rcl_node_t node;
 
-// Timers
-rcl_timer_t steering_feedback_timer;    // 20Hz publisher timer
-rcl_timer_t steering_control_timer;      // 10Hz steering control
-rcl_timer_t brushless_control_timer;     // 10Hz brushless control
+// ============== Timers ==============
+rcl_timer_t steering_feedback_timer;    // 20Hz publisher timer (runs on Core 1)
 
-// Executors
+// ============== Executors ==============
 rclc_executor_t pub_executor;
 rclc_executor_t sub_executor;
 
-// Messages
+// ============== Messages ==============
 std_msgs__msg__Float32 steering_angle_msg;
 std_msgs__msg__Float32 steering_command_msg;
 std_msgs__msg__Float32 throttle_msg;
 
-// Control variables
-float steering_command_value = 0.0f;
-float throttle_value = 0.0f;
-float current_steering_angle = 0.0f;
+// ============== Control variables (volatile for cross-core access) ==============
+volatile float steering_command_value = 0.0f;
+volatile float throttle_value = 0.0f;
+volatile float current_steering_angle = 0.0f;
+
+// ============== Timing for control loop ==============
+const TickType_t CONTROL_PERIOD_MS = 100;  // 10Hz control loop (100ms)
 
 enum states {
   WAITING_AGENT,
@@ -46,44 +50,50 @@ enum states {
   AGENT_DISCONNECTED
 } state;
 
-// Callback for /steering_command subscriber
+// ============== Callback for /steering_command subscriber ==============
 void steering_command_callback(const void *msgin) {
   const std_msgs__msg__Float32 *msg = (const std_msgs__msg__Float32 *)msgin;
   steering_command_value = msg->data;
 }
 
-// Callback for /throttle subscriber
+// ============== Callback for /throttle subscriber ==============
 void throttle_callback(const void *msgin) {
   const std_msgs__msg__Float32 *msg = (const std_msgs__msg__Float32 *)msgin;
   throttle_value = msg->data;
 }
 
-// Timer callback for publishing steering angle feedback at 20Hz
+// ============== Timer callback for publishing steering angle feedback at 20Hz (Core 1) ==============
 void steering_feedback_timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
   RCLC_UNUSED(last_call_time);
   if (timer != NULL) {
-    // TODO: Get actual steering angle from sensor/encoder
     steering_angle_msg.data = current_steering_angle;
     RCSOFTCHECK(rcl_publish(&steering_angle_publisher, &steering_angle_msg, NULL));
   }
 }
 
-// Timer callback for steering control at 10Hz
-void steering_control_timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
-  RCLC_UNUSED(last_call_time);
-  if (timer != NULL) {
-    // TODO: Implement steering control logic
-    // Use steering_command_value to control the steering servo
-    // Update current_steering_angle with feedback
-  }
-}
-
-// Timer callback for brushless motor control at 10Hz
-void brushless_control_timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
-  RCLC_UNUSED(last_call_time);
-  if (timer != NULL) {
-    // TODO: Implement brushless motor control logic
-    // Use throttle_value to control the brushless motor
+// ============== Control Task running on Core 0 ==============
+// Handles both steering and brushless motor control at 10Hz
+void controlTask(void *pvParameters) {
+  TickType_t xLastWakeTime = xTaskGetTickCount();
+  
+  for (;;) {
+    // Only run control when agent is connected
+    if (state == AGENT_CONNECTED) {
+      // ----- Steering Control (10Hz) -----
+      // TODO: Implement steering control logic
+      // Use steering_command_value to control the steering servo
+      // Update current_steering_angle with feedback
+      
+      // ----- Brushless Motor Control (10Hz) -----
+      // TODO: Implement brushless motor control logic
+      // Use throttle_value to control the brushless motor
+    } else {
+      // Safety: Set motors to safe state when disconnected
+      // TODO: Set steering to neutral, motor to stop
+    }
+    
+    // Precise timing using vTaskDelayUntil for consistent 10Hz loop
+    vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(CONTROL_PERIOD_MS));
   }
 }
 
@@ -121,7 +131,7 @@ bool create_entities(void){
     "/throttle")
   );
 
-  // Create steering feedback timer at 20Hz (50ms period)
+  // Create steering feedback timer at 20Hz (50ms period) - runs on Core 1
   const unsigned int feedback_timer_timeout = 50;
   RCCHECK(rclc_timer_init_default(
     &steering_feedback_timer,
@@ -130,30 +140,12 @@ bool create_entities(void){
     steering_feedback_timer_callback)
   );
 
-  // Create steering control timer at 10Hz (100ms period)
-  const unsigned int steering_control_timeout = 100;
-  RCCHECK(rclc_timer_init_default(
-    &steering_control_timer,
-    &support,
-    RCL_MS_TO_NS(steering_control_timeout),
-    steering_control_timer_callback)
-  );
-
-  // Create brushless control timer at 10Hz (100ms period)
-  const unsigned int brushless_control_timeout = 100;
-  RCCHECK(rclc_timer_init_default(
-    &brushless_control_timer,
-    &support,
-    RCL_MS_TO_NS(brushless_control_timeout),
-    brushless_control_timer_callback)
-  );
-
-  // Create executors
+  // Create executors (all run on Core 1 with micro-ROS)
   pub_executor = rclc_executor_get_zero_initialized_executor();
   sub_executor = rclc_executor_get_zero_initialized_executor();
 
-  // Publisher executor: 1 feedback timer + 2 control timers = 3 handles
-  RCCHECK(rclc_executor_init(&pub_executor, &support.context, 3, &allocator));
+  // Publisher executor: 1 feedback timer = 1 handle
+  RCCHECK(rclc_executor_init(&pub_executor, &support.context, 1, &allocator));
   // Subscriber executor: 2 subscriptions = 2 handles
   RCCHECK(rclc_executor_init(&sub_executor, &support.context, 2, &allocator));
 
@@ -161,10 +153,8 @@ bool create_entities(void){
   RCCHECK(rclc_executor_add_subscription(&sub_executor, &steering_command_subscriber, &steering_command_msg, steering_command_callback, ON_NEW_DATA));
   RCCHECK(rclc_executor_add_subscription(&sub_executor, &throttle_subscriber, &throttle_msg, throttle_callback, ON_NEW_DATA));
 
-  // Add timers to pub_executor
+  // Add timer to pub_executor
   RCCHECK(rclc_executor_add_timer(&pub_executor, &steering_feedback_timer));
-  RCCHECK(rclc_executor_add_timer(&pub_executor, &steering_control_timer));
-  RCCHECK(rclc_executor_add_timer(&pub_executor, &brushless_control_timer));
 
   return true;
 }
@@ -178,8 +168,6 @@ void destroy_entities(){
   rcl_subscription_fini(&throttle_subscriber, &node);
 
   rcl_timer_fini(&steering_feedback_timer);
-  rcl_timer_fini(&steering_control_timer);
-  rcl_timer_fini(&brushless_control_timer);
 
   rclc_executor_fini(&pub_executor);
   rclc_executor_fini(&sub_executor);
@@ -196,10 +184,23 @@ void setup() {
   // TODO: Initialize steering servo
   // TODO: Initialize brushless motor controller
   
+  // Create control task pinned to Core 0 (PRO_CPU)
+  // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
+  xTaskCreatePinnedToCore(
+    controlTask,           // Task function
+    "ControlTask",         // Task name
+    4096,                  // Stack size (bytes)
+    NULL,                  // Task parameters
+    2,                     // Priority (higher than default loop)
+    &controlTaskHandle,    // Task handle
+    0                      // Pin to Core 0
+  );
+  
   state = WAITING_AGENT;
 }
 
 void loop() {
+  // This loop runs on Core 1 - handles all micro-ROS communication
   switch (state) {
     case WAITING_AGENT:
       EXECUTE_EVERY_N_MS(500, state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_AVAILABLE : WAITING_AGENT;);
@@ -213,8 +214,9 @@ void loop() {
     case AGENT_CONNECTED:
       EXECUTE_EVERY_N_MS(200, state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;);
       if (state == AGENT_CONNECTED) {
+        // Spin executors - handles pub/sub on Core 1
         RCSOFTCHECK(rclc_executor_spin_some(&pub_executor, RCL_MS_TO_NS(10)));
-        RCSOFTCHECK(rclc_executor_spin_some(&sub_executor, RCL_MS_TO_NS(20)));
+        RCSOFTCHECK(rclc_executor_spin_some(&sub_executor, RCL_MS_TO_NS(10)));
       }
       break;
     case AGENT_DISCONNECTED:
@@ -224,4 +226,6 @@ void loop() {
     default:
       break;
   }
+  // Small delay to yield to other tasks and prevent watchdog issues
+  vTaskDelay(pdMS_TO_TICKS(1));
 }
