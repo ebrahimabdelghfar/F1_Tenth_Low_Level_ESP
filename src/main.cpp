@@ -7,7 +7,8 @@
 #include <uros_config.h>
 #include <rmw_microros/rmw_microros.h>
 #include <rcl/error_handling.h>
-
+#include <brushless_control.h>
+#include "pins_config.h"
 // ============== FreeRTOS Task Handles ==============
 TaskHandle_t controlTaskHandle = NULL;
 
@@ -39,9 +40,9 @@ std_msgs__msg__Float32 throttle_msg;
 volatile float steering_command_value = 0.0f;
 volatile float throttle_value = 0.0f;
 volatile float current_steering_angle = 0.0f;
-
+BrushlessControl brushlessControl;
 // ============== Timing for control loop ==============
-const TickType_t CONTROL_PERIOD_MS = 100;  // 10Hz control loop (100ms)
+const TickType_t CONTROL_PERIOD_MS = 1;  // 1kHz control loop (1ms)
 
 enum states {
   WAITING_AGENT,
@@ -89,6 +90,7 @@ void controlTask(void *pvParameters) {
       // Use throttle_value to control the brushless motor
     } else {
       // Safety: Set motors to safe state when disconnected
+      brushlessControl.stop();
       // TODO: Set steering to neutral, motor to stop
     }
     
@@ -182,7 +184,7 @@ void setup() {
   set_microros_serial_transports(Serial);
   
   // TODO: Initialize steering servo
-  // TODO: Initialize brushless motor controller
+  brushlessControl.init(BRUSHLESS_PWM_PIN); // Example: Initialize brushless motor on pin 5
   
   // Create control task pinned to Core 0 (PRO_CPU)
   // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
@@ -191,7 +193,7 @@ void setup() {
     "ControlTask",         // Task name
     4096,                  // Stack size (bytes)
     NULL,                  // Task parameters
-    2,                     // Priority (higher than default loop)
+    configMAX_PRIORITIES - 1, // Highest priority for fastest scheduling
     &controlTaskHandle,    // Task handle
     0                      // Pin to Core 0
   );
