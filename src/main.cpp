@@ -9,6 +9,7 @@
 #include <rcl/error_handling.h>
 #include <brushless_control.h>
 #include "pins_config.h"
+#include "filter_lib.h"
 // ============== FreeRTOS Task Handles ==============
 TaskHandle_t controlTaskHandle = NULL;
 
@@ -41,6 +42,7 @@ volatile float steering_command_value = 0.0f;
 volatile float throttle_value = 0.0f;
 volatile float current_steering_angle = 0.0f;
 BrushlessControl brushlessControl;
+AngleFilter angleFilter;
 // ============== Timing for control loop ==============
 const TickType_t CONTROL_PERIOD_MS = 1;  // 1kHz control loop (1ms)
 
@@ -185,7 +187,7 @@ void setup() {
   
   // TODO: Initialize steering servo
   brushlessControl.init(BRUSHLESS_PWM_PIN); // Example: Initialize brushless motor on pin 5
-  
+  angleFilter.begin(0.001f, 0.01f, 0.001f, 0.1f); // default_dt=1ms, Q_angle=0.01, Q_vel=0.001, R_meas=0.1
   // Create control task pinned to Core 0 (PRO_CPU)
   // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
   xTaskCreatePinnedToCore(
