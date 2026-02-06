@@ -10,6 +10,10 @@
 #include <brushless_control.h>
 #include "pins_config.h"
 #include "filter_lib.h"
+#include "servo_control.h"
+#include "pid_lib.h"
+#include "servo_config.h"
+#include "filter_config.h"
 // ============== FreeRTOS Task Handles ==============
 TaskHandle_t controlTaskHandle = NULL;
 
@@ -43,6 +47,9 @@ volatile float throttle_value = 0.0f;
 volatile float current_steering_angle = 0.0f;
 BrushlessControl brushlessControl;
 AngleFilter angleFilter;
+PIDController pidController;
+ServoControl servoControl;
+ServoPID steeringPID;
 // ============== Timing for control loop ==============
 const TickType_t CONTROL_PERIOD_MS = 1;  // 1kHz control loop (1ms)
 
@@ -69,8 +76,10 @@ void throttle_callback(const void *msgin) {
 void steering_feedback_timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
   RCLC_UNUSED(last_call_time);
   if (timer != NULL) {
-    steering_angle_msg.data = current_steering_angle;
-    RCSOFTCHECK(rcl_publish(&steering_angle_publisher, &steering_angle_msg, NULL));
+    current_steering_angle = servoControl.getCurrentAngle(); // Read current angle from servo feedback
+    current_steering_angle = angleFilter.update(current_steering_angle); // Apply hybrid filter to raw angle
+    steering_angle_msg.data = current_steering_angle; // Update message with current angle
+    RCSOFTCHECK(rcl_publish(&steering_angle_publisher, &steering_angle_msg, NULL)); // Publish feedback
   }
 }
 
@@ -186,8 +195,10 @@ void setup() {
   set_microros_serial_transports(Serial);
   
   // TODO: Initialize steering servo
+  servoControl.Servo_Init(STEERING_SERVO_PIN, STEERING_ANGLE_SENSOR_PIN);
   brushlessControl.init(BRUSHLESS_PWM_PIN); // Example: Initialize brushless motor on pin 5
-  angleFilter.begin(0.001f, 0.01f, 0.001f, 0.1f); // default_dt=1ms, Q_angle=0.01, Q_vel=0.001, R_meas=0.1
+  angleFilter.begin(0.001f, FILTER_Q_ANGLE, FILTER_Q_VEL, FILTER_R_MEAS); // default_dt=1ms, Q_angle=0.01, Q_vel=0.001, R_meas=0.1
+  pidController.PID_Init(&steeringPID, SERVO_KP, SERVO_KI, SERVO_KD, INTEGRAL_WINDUP_GUARD,OUTPUT_LIMIT); // Example PID parameters
   // Create control task pinned to Core 0 (PRO_CPU)
   // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
   xTaskCreatePinnedToCore(

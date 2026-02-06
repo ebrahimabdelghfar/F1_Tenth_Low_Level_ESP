@@ -10,9 +10,10 @@ public:
     /**
      * @brief Initialize the servo motor
      * @param pin: GPIO pin number to which the servo is connected
+     * @param feedbackPin: GPIO pin number for feedback (analog input)
      * @return None
      */
-    void Servo_Init(int pin);
+    void Servo_Init(int pin, int feedbackPin);
     /**
      * @brief Set the servo angle
      * @param angle: Desired servo angle in degrees
@@ -25,23 +26,24 @@ public:
      * @return None
      */
     void setServoPulseWidth(float effort);
+
     /**
-     * @brief Map a voltage value to a servo angle
-     * @param voltage: Input voltage
-     * @param min_angle: Minimum angle corresponding to minimum voltage
-     * @param max_angle: Maximum angle corresponding to maximum voltage
-     * @return Mapped servo angle in degrees
+     * @brief Get the current angle of the servo
+     * @return Current servo angle in degrees
      */
-    float map_voltage_to_angle(float voltage, float min_angle, float max_angle);
+    float getCurrentAngle(void); // Get the current angle of the servo in degrees
+
     /**
-     * @brief Read and wrap angle to [-180, 180]
-     * @param angle: Input angle in degrees
-     * @return Wrapped angle in degrees
+     * @brief Constrain an angle to the range [-180, 180]
+     * @param x: Input angle in degrees
+     * @return Constrained angle in degrees
      */
-    float readWrappedAngle(float angle);
+    float constrainAngle(float x);
 
 private:
     Servo servo; // Create a Servo object for controlling the steering servo
+    int analogPin; // GPIO pin for reading the current angle (if using feedback)
+    float lastAngle; // Store the last angle for wrap-around handling
 };
 
 #endif /* __SERVO_H__ */
