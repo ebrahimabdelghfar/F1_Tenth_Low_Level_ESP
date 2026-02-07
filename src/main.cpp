@@ -15,6 +15,7 @@
 #include "servo_config.h"
 #include "filter_config.h"
 #include "esp32_config.h"
+#include "rtos_utils_lib.h"
 /* ============== Create Threads Safe Mutexes ============== */
 SemaphoreHandle_t servoSetPointMutex = NULL;
 SemaphoreHandle_t steeringAngleReadingMutex = NULL;
@@ -57,7 +58,7 @@ PIDController pidController;
 ServoControl servoControl;
 ServoPID steeringPID;
 // ============== Timing for control loop ==============
-const TickType_t CONTROL_PERIOD_MS = 10;  // 100Hz control loop (10ms)
+const TickType_t CONTROL_PERIOD_MS = 10;  // 100Hz control loop (10ms period)
 
 enum states {
   WAITING_AGENT,
@@ -69,19 +70,24 @@ enum states {
 // ============== Callback for /steering_command subscriber ==============
 void steering_command_callback(const void *msgin) {
   const std_msgs__msg__Float32 *msg = (const std_msgs__msg__Float32 *)msgin;
+  logInMutex(&servoSetPointMutex, "SteeringCommandCallback");
   steering_command_value = msg->data;
+  logOutMutex(&servoSetPointMutex, "SteeringCommandCallback");
 }
 
 // ============== Callback for /throttle subscriber ==============
 void throttle_callback(const void *msgin) {
   const std_msgs__msg__Float32 *msg = (const std_msgs__msg__Float32 *)msgin;
+  logInMutex(&throttleCommandMutex, "ThrottleCallback");
   throttle_command_value = msg->data;
+  logOutMutex(&throttleCommandMutex, "ThrottleCallback");
 }
 
 // ============== Timer callback for publishing steering angle feedback at 20Hz (Core 1) ==============
 void steering_feedback_timer_callback(rcl_timer_t * timer, int64_t last_call_time) {
   RCLC_UNUSED(last_call_time);
   if (timer != NULL) {
+    logInMutex(&steeringAngleReadingMutex, "SteeringFeedbackTimerCallback");
     current_steering_angle = servoControl.getCurrentAngle(); // Read current angle from servo feedback
     current_steering_angle = angleFilter.update(current_steering_angle); // Apply hybrid filter to raw angle
     steering_angle_msg.data = current_steering_angle; // Update message with current angle
@@ -108,7 +114,7 @@ void controlTask(void *pvParameters) {
     } else {
       // Safety: Set motors to safe state when disconnected
       brushlessControl.stop();
-      // TODO: Set steering to neutral, motor to stop
+      servoControl.setServoPulseWidth(0.0f); // Set steering to neutral
     }
     
     // Precise timing using vTaskDelayUntil for consistent 10Hz loop
@@ -210,7 +216,9 @@ void setup() {
   angleFilter.begin(0.001f, FILTER_Q_ANGLE, FILTER_Q_VEL, FILTER_R_MEAS); // default_dt=1ms, Q_angle=0.01, Q_vel=0.001, R_meas=0.1
   pidController.PID_Init(&steeringPID, SERVO_KP, SERVO_KI, SERVO_KD, INTEGRAL_WINDUP_GUARD,OUTPUT_LIMIT); // Example PID parameters
   // create mutexes for thread-safe variable access if needed 
-
+  servoSetPointMutex = xSemaphoreCreateMutex();
+  steeringAngleReadingMutex = xSemaphoreCreateMutex();
+  throttleCommandMutex = xSemaphoreCreateMutex();
   // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
   xTaskCreatePinnedToCore(
     controlTask,           // Task function
