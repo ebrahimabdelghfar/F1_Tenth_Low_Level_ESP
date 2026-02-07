@@ -14,6 +14,7 @@
 #include "pid_lib.h"
 #include "servo_config.h"
 #include "filter_config.h"
+#include "esp32_config.h"
 // ============== FreeRTOS Task Handles ==============
 TaskHandle_t controlTaskHandle = NULL;
 
@@ -43,7 +44,7 @@ std_msgs__msg__Float32 throttle_msg;
 
 // ============== Control variables (volatile for cross-core access) ==============
 volatile float steering_command_value = 0.0f;
-volatile float throttle_value = 0.0f;
+volatile float throttle_command_value = 0.0f;
 volatile float current_steering_angle = 0.0f;
 BrushlessControl brushlessControl;
 AngleFilter angleFilter;
@@ -69,7 +70,7 @@ void steering_command_callback(const void *msgin) {
 // ============== Callback for /throttle subscriber ==============
 void throttle_callback(const void *msgin) {
   const std_msgs__msg__Float32 *msg = (const std_msgs__msg__Float32 *)msgin;
-  throttle_value = msg->data;
+  throttle_command_value = msg->data;
 }
 
 // ============== Timer callback for publishing steering angle feedback at 20Hz (Core 1) ==============
@@ -98,7 +99,7 @@ void controlTask(void *pvParameters) {
       
       // ----- Brushless Motor Control (10Hz) -----
       // TODO: Implement brushless motor control logic
-      // Use throttle_value to control the brushless motor
+      // Use throttle_command_value to control the brushless motor
     } else {
       // Safety: Set motors to safe state when disconnected
       brushlessControl.stop();
@@ -189,6 +190,10 @@ void destroy_entities(){
 }
 
 void setup() {
+  /*set ESP32 Configuration*/
+  setCpuFrequencyMhz(ESP32_CLOCK_SPEED_MHZ);
+  analogReadResolution(ANALOG_READ_RESOLUTION);
+  analogSetAttenuation(ANALOG_ATTENUATION);
   // Configure serial transport
   Serial.begin(115200);
   while(!Serial); // Wait until Serial is ready

@@ -14,10 +14,16 @@ void ServoControl::setServoPulseWidth(float effort) {
 }
 
 float ServoControl::getCurrentAngle(void) {
-    int reading = analogRead(analogPin); // Read the current pulse width in microseconds
-    float voltage = ((float)reading / ADC_RESOLUTION) * ESP32_VOLTAGE;
+    int averageReading = 0;
+    for (int i = 0; i < NUM_ANGLE_SAMPLES; i++) {
+        int reading = analogRead(analogPin); // Read the current pulse width in microseconds
+        averageReading += reading;
+    }
+    averageReading /= NUM_ANGLE_SAMPLES;
+    float voltage = ((float)averageReading / ADC_RESOLUTION) * ESP32_VOLTAGE;
     float angle = (voltage / SERVO_MAX_VOLTAGE) * SERVO_MAX_ANGLE;
-    lastAngle = angle; // Store the last angle for wrap-around handling
+    angle = constrainAngle(angle);
+    // lastAngle = angle; // Store the last angle for wrap-around handling
     return angle;
 }
 

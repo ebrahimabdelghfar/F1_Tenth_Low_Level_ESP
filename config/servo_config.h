@@ -2,9 +2,9 @@
 #define __SERVO_CONFIG_H__
 
 #define SERVO_MIN_ANGLE         -180.0f    // Minimum angle in degrees
-#define SERVO_MAX_VOLTAGE       1.65f    // Maximum voltage in volts
+#define SERVO_MAX_VOLTAGE       3.3f    // Maximum voltage in volts
 #define ESP32_VOLTAGE       3.3f    // Minimum voltage in volts
-#define SERVO_MAX_ANGLE        180.0f  // Maximum angle in degrees
+#define SERVO_MAX_ANGLE        360.0f  // Maximum angle in degrees
 #define SERVO_PWM_FREQUENCY     50      // PWM frequency in Hz
 #define SERVO_KP          25.0f    // Proportional gain for control  
 #define SERVO_KI          5.0f   // Integral gain for control
@@ -16,5 +16,6 @@
 #define ADC_RESOLUTION 4095.0f  // 12-bit ADC
 #define MAX_PWM_PULSE_WIDTH 2000  // Maximum PWM pulse width in microseconds
 #define MIN_PWM_PULSE_WIDTH 500   // Minimum PWM pulse width in microseconds
+#define NUM_ANGLE_SAMPLES 20 // Number of samples for moving average filter
 
 #endif /* __SERVO_CONFIG_H__ */
