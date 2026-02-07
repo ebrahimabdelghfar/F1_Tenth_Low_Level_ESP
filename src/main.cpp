@@ -92,6 +92,7 @@ void steering_feedback_timer_callback(rcl_timer_t * timer, int64_t last_call_tim
     current_steering_angle = angleFilter.update(current_steering_angle); // Apply hybrid filter to raw angle
     steering_angle_msg.data = current_steering_angle; // Update message with current angle
     RCSOFTCHECK(rcl_publish(&steering_angle_publisher, &steering_angle_msg, NULL)); // Publish feedback
+    logOutMutex(&steeringAngleReadingMutex, "SteeringFeedbackTimerCallback");
   }
 }
 
@@ -116,7 +117,6 @@ void controlTask(void *pvParameters) {
       brushlessControl.stop();
       servoControl.setServoPulseWidth(0.0f); // Set steering to neutral
     }
-    
     // Precise timing using vTaskDelayUntil for consistent 10Hz loop
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(CONTROL_PERIOD_MS));
   }
