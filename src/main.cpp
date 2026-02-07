@@ -57,7 +57,7 @@ PIDController pidController;
 ServoControl servoControl;
 ServoPID steeringPID;
 // ============== Timing for control loop ==============
-const TickType_t CONTROL_PERIOD_MS = 1;  // 1kHz control loop (1ms)
+const TickType_t CONTROL_PERIOD_MS = 10;  // 100Hz control loop (10ms)
 
 enum states {
   WAITING_AGENT,
