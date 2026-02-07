@@ -15,6 +15,11 @@
 #include "servo_config.h"
 #include "filter_config.h"
 #include "esp32_config.h"
+/* ============== Create Threads Safe Mutexes ============== */
+SemaphoreHandle_t servoSetPointMutex = NULL;
+SemaphoreHandle_t steeringAngleReadingMutex = NULL;
+SemaphoreHandle_t throttleCommandMutex = NULL;
+
 // ============== FreeRTOS Task Handles ==============
 TaskHandle_t controlTaskHandle = NULL;
 
@@ -204,7 +209,8 @@ void setup() {
   brushlessControl.init(BRUSHLESS_PWM_PIN); // Example: Initialize brushless motor on pin 5
   angleFilter.begin(0.001f, FILTER_Q_ANGLE, FILTER_Q_VEL, FILTER_R_MEAS); // default_dt=1ms, Q_angle=0.01, Q_vel=0.001, R_meas=0.1
   pidController.PID_Init(&steeringPID, SERVO_KP, SERVO_KI, SERVO_KD, INTEGRAL_WINDUP_GUARD,OUTPUT_LIMIT); // Example PID parameters
-  // Create control task pinned to Core 0 (PRO_CPU)
+  // create mutexes for thread-safe variable access if needed 
+
   // Core 1 (APP_CPU) is used for micro-ROS communication (Arduino default)
   xTaskCreatePinnedToCore(
     controlTask,           // Task function
