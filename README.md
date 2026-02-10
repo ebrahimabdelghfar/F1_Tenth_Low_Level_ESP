@@ -83,14 +83,14 @@ The firmware communicates with a ROS 2 host over **micro-ROS serial transport**,
 │   (Control Task)          │   (micro-ROS / Arduino loop)        │
 │                           │                                     │
 │  ┌─────────────────────┐  │  ┌───────────────────────────────┐  │
-│  │  100 Hz Control Loop │  │  │  micro-ROS State Machine      │  │
-│  │  ─────────────────── │  │  │  ─────────────────────────    │  │
-│  │  • Read steering cmd │◄─┼──│  • Subscriber callbacks       │  │
-│  │  • Read throttle cmd │◄─┼──│    /steering_command          │  │
-│  │  • PID compute       │  │  │    /throttle                  │  │
-│  │  • Servo actuation   │  │  │  • Publisher timer (20 Hz)    │  │
-│  │  • ESC actuation     │  │  │    /steering_angle            │  │
-│  │  • vTaskDelayUntil   │  │  │  • Agent ping & reconnect    │  │
+│  │  100 Hz Control Loop│  │  │  micro-ROS State Machine      │  │
+│  │  ───────────────────│  │  │  ─────────────────────────    │  │
+│  │  • Read steering cmd│◄─┼──│  • Subscriber callbacks       │  │
+│  │  • Read throttle cmd│◄─┼──│    /steering_command          │  │
+│  │  • PID compute      │  │  │    /throttle                  │  │
+│  │  • Servo actuation  │  │  │  • Publisher timer (20 Hz)    │  │
+│  │  • ESC actuation    │  │  │    /steering_angle            │  │
+│  │  • vTaskDelayUntil  │  │  │  • Agent ping & reconnect     │  │
 │  └─────────────────────┘  │  └───────────────────────────────┘  │
 │                           │                                     │
 │    FreeRTOS Mutexes ◄─────┼──────► FreeRTOS Mutexes             │
@@ -104,14 +104,15 @@ The firmware communicates with a ROS 2 host over **micro-ROS serial transport**,
 The micro-ROS connection lifecycle is managed by a four-state state machine running on Core 1:
 
 ```
- ┌──────────────┐   Agent found    ┌─────────────────┐
+ ┌──────────────┐   Agent found    ┌──────────────────┐
  │ WAITING_AGENT├─────────────────►│ AGENT_AVAILABLE  │
  └──────┬───────┘                  └────────┬─────────┘
         ▲                                   │
-        │  Entities destroyed               │ create_entities()
+        │  Entities destroyed               │
+        |                                   | create_entities()
         │                                   ▼
  ┌──────┴───────────┐  Ping fail   ┌────────────────┐
- │ AGENT_DISCONNECTED│◄────────────│ AGENT_CONNECTED │
+ │AGENT_DISCONNECTED│◄─────────────│ AGENT_CONNECTED│
  └──────────────────┘              └────────────────┘
                                     Spin executors
                                     Ping every 200ms
