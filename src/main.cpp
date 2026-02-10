@@ -95,7 +95,8 @@ void steering_feedback_timer_callback(rcl_timer_t *timer, int64_t last_call_time
     logInMutex(&steeringAngleReadingMutex, "SteeringFeedbackTimerCallback");
     current_steering_angle = servoControl.getCurrentAngle();                        // Read current angle from servo feedback
     current_steering_angle = angleFilter.update(current_steering_angle);            // Apply hybrid filter to raw angle
-    steering_angle_msg.data = current_steering_angle;                               // Update message with current angle
+    current_steering_angle = servoControl.constrainAngle(current_steering_angle);   // Constrain angle to [-180, 180]
+    steering_angle_msg.data = current_steering_angle-ANGLE_OFFSET;                               // Update message with current angle
     RCSOFTCHECK(rcl_publish(&steering_angle_publisher, &steering_angle_msg, NULL)); // Publish feedback
     logOutMutex(&steeringAngleReadingMutex, "SteeringFeedbackTimerCallback");
   }
@@ -112,40 +113,25 @@ void controlTask(void *pvParameters)
     // Only run control when agent is connected
     if (state == AGENT_CONNECTED) {
       // ----- Steering Control (100Hz) -----
-      // 1. Read raw angle from ADC feedback
-      float raw_angle = servoControl.getCurrentAngle();
-      
-      // 2. Apply hybrid filter (Median + Kalman) for noise rejection and smoothing
-      float filtered_angle = angleFilter.update(raw_angle);
-      
-      // 3. Get setpoint from ROS command (thread-safe access)
-      float setpoint;
       logInMutex(&servoSetPointMutex, "ControlTask");
-      setpoint = steering_command_value;
-      logOutMutex(&servoSetPointMutex, "ControlTask");
-      
-      // 4. Compute PID output (returns PWM offset in microseconds)
-      float pwm_offset = pidController.PID_Compute(&steeringPID, setpoint, filtered_angle);
-      
-      // 5. Apply PWM output to servo motor
+      float raw_angle = servoControl.getCurrentAngle();
+      float filtered_angle = angleFilter.update(raw_angle);
+      filtered_angle = servoControl.constrainAngle(filtered_angle)-ANGLE_OFFSET; // Constrain to [-180, 180] and apply offset
+      float pwm_offset = pidController.PID_Compute(&steeringPID, steering_command_value, filtered_angle);
       servoControl.setServoPulseWidth(pwm_offset);
-      
-      // Note: current_steering_angle is updated in steering_feedback_timer_callback (20Hz)
-      // which reads from servoControl.getCurrentAngle() and applies the same filter
-      
-      // ----- Brushless Motor Control (100Hz) -----
-      // 1. Get throttle command from ROS (thread-safe access)
-      float throttle;
+      logOutMutex(&servoSetPointMutex, "ControlTask");
+    
       logInMutex(&throttleCommandMutex, "ControlTask");
-      throttle = throttle_command_value;
+      brushlessControl.set_throttle(throttle_command_value);
       logOutMutex(&throttleCommandMutex, "ControlTask");
       
-      // 2. Apply throttle to brushless motor ESC
-      brushlessControl.set_throttle(throttle);
+
     } else {
       // Safety: Set motors to safe state when disconnected
+      logInMutex(&throttleCommandMutex, "ControlTask");
       brushlessControl.stop();
       servoControl.setServoPulseWidth(0.0f); // Set steering to neutral
+      logOutMutex(&throttleCommandMutex, "ControlTask");
     }
     // Precise timing using vTaskDelayUntil for consistent 10Hz loop
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(CONTROL_PERIOD_MS));
