@@ -8,6 +8,10 @@
 #define __RTOS_UTILS_LIB_H__
 #include <Arduino.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * @brief logInMutex - Logs and takes a mutex
  * @param mutex Pointer to the mutex handle to take
@@ -23,5 +27,9 @@ void logInMutex(SemaphoreHandle_t *mutex, const char *taskName);
  * @returns void
  */
 void logOutMutex(SemaphoreHandle_t *mutex, const char *taskName);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __RTOS_UTILS_LIB_H__ */

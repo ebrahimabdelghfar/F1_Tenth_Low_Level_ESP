@@ -104,14 +104,37 @@ void controlTask(void *pvParameters) {
   for (;;) {
     // Only run control when agent is connected
     if (state == AGENT_CONNECTED) {
-      // ----- Steering Control (10Hz) -----
-      // TODO: Implement steering control logic
-      // Use steering_command_value to control the steering servo
-      // Update current_steering_angle with feedback
+      // ----- Steering Control (100Hz) -----
+      // 1. Read raw angle from ADC feedback
+      float raw_angle = servoControl.getCurrentAngle();
       
-      // ----- Brushless Motor Control (10Hz) -----
-      // TODO: Implement brushless motor control logic
-      // Use throttle_command_value to control the brushless motor
+      // 2. Apply hybrid filter (Median + Kalman) for noise rejection and smoothing
+      float filtered_angle = angleFilter.update(raw_angle);
+      
+      // 3. Get setpoint from ROS command (thread-safe access)
+      float setpoint;
+      logInMutex(&servoSetPointMutex, "ControlTask");
+      setpoint = steering_command_value;
+      logOutMutex(&servoSetPointMutex, "ControlTask");
+      
+      // 4. Compute PID output (returns PWM offset in microseconds)
+      float pwm_offset = pidController.PID_Compute(&steeringPID, setpoint, filtered_angle);
+      
+      // 5. Apply PWM output to servo motor
+      servoControl.setServoPulseWidth(pwm_offset);
+      
+      // Note: current_steering_angle is updated in steering_feedback_timer_callback (20Hz)
+      // which reads from servoControl.getCurrentAngle() and applies the same filter
+      
+      // ----- Brushless Motor Control (100Hz) -----
+      // 1. Get throttle command from ROS (thread-safe access)
+      float throttle;
+      logInMutex(&throttleCommandMutex, "ControlTask");
+      throttle = throttle_command_value;
+      logOutMutex(&throttleCommandMutex, "ControlTask");
+      
+      // 2. Apply throttle to brushless motor ESC
+      brushlessControl.set_throttle(throttle);
     } else {
       // Safety: Set motors to safe state when disconnected
       brushlessControl.stop();

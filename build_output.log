@@ -1,0 +1,41 @@
+Processing upesy_wroom (platform: espressif32; board: upesy_wroom; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/upesy_wroom.html
+PLATFORM: Espressif 32 (6.12.0) > uPesy ESP32 Wroom DevKit
+HARDWARE: ESP32 240MHz, 320KB RAM, 4MB Flash
+DEBUG: Current (cmsis-dap) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.40900.250804 (4.9.0) 
+ - toolchain-xtensa-esp32 @ 8.4.0+2021r2-patch5
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Installing importlib-resources with pip at PlatformIO environment
+/home/hazem/anaconda3/bin/python3 -m pip install importlib-resources
+Requirement already satisfied: importlib-resources in /home/hazem/anaconda3/lib/python3.13/site-packages (6.5.2)
+Installing pyyaml with pip at PlatformIO environment
+/home/hazem/anaconda3/bin/python3 -m pip install pyyaml
+Requirement already satisfied: pyyaml in /home/hazem/anaconda3/lib/python3.13/site-packages (6.0.2)
+Installing pytz with pip at PlatformIO environment
+/home/hazem/anaconda3/bin/python3 -m pip install pytz
+Requirement already satisfied: pytz in /home/hazem/anaconda3/lib/python3.13/site-packages (2024.1)
+Installing markupsafe==2.0.1 with pip at PlatformIO environment
+/home/hazem/anaconda3/bin/python3 -m pip install markupsafe==2.0.1
+Requirement already satisfied: markupsafe==2.0.1 in /home/hazem/anaconda3/lib/python3.13/site-packages (2.0.1)
+Installing empy==3.3.4 with pip at PlatformIO environment
+/home/hazem/anaconda3/bin/python3 -m pip install empy==3.3.4
+Requirement already satisfied: empy==3.3.4 in /home/hazem/anaconda3/lib/python3.13/site-packages (3.3.4)
+Configuring upesy_wroom with transport serial
+Downloading micro-ROS dev dependencies
+	 - Downloaded ament_cmake
+	 - Downloaded ament_lint
+	 - Downloaded ament_package
+	 - Downloaded googletest
+	 - Downloaded ament_cmake_ros
+	 - Downloaded ament_index
+Building micro-ROS dev dependencies
+Build dev micro-ROS environment failed: 
+ /bin/sh: 1: /home/hazem/.platformio/penv/bin/activate: Syntax error: ")" unexpected
+
+========================== [FAILED] Took 9.64 seconds ==========================
