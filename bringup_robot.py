@@ -27,7 +27,8 @@ ESP32_VENDOR_ID = "10c4"
 ESP32_MODEL_ID = "CP2102_USB_to_UART_Bridge_Controller"
 
 DEFAULT_BAUD_RATE = 115200
-DEFAULT_DOCKER_IMAGE = "microros/micro-ros-agent:jazzy"
+DEFAULT_ROS_DISTRO = (os.environ.get("ROS_DISTRO") or "jazzy").strip().lower()
+DEFAULT_DOCKER_IMAGE = f"microros/micro-ros-agent:{DEFAULT_ROS_DISTRO}"
 DEVICE_SCAN_PATTERNS = ["/dev/ttyUSB*", "/dev/ttyACM*"]
 
 AGENT_HEALTH_CHECK_PERIOD_SEC = 3.0   # How often to check if agent is alive

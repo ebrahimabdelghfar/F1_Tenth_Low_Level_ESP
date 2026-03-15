@@ -37,11 +37,10 @@ rcl_allocator_t allocator;
 rcl_node_t node;
 
 // ============== Timers ==============
-rcl_timer_t steering_feedback_timer; // 20Hz publisher timer (runs on Core 1)
+rcl_timer_t steering_feedback_timer; // Publisher timer (runs on Core 1)
 
 // ============== Executors ==============
-rclc_executor_t pub_executor;
-rclc_executor_t sub_executor;
+rclc_executor_t ros_executor;
 
 // ============== Messages ==============
 std_msgs__msg__Float32 steering_angle_msg;
@@ -59,6 +58,12 @@ ServoControl servoControl;
 ServoPID steeringPID;
 // ============== Timing for control loop ==============
 const TickType_t CONTROL_PERIOD_MS = 10; // 100Hz control loop (10ms period)
+const uint32_t STEERING_FEEDBACK_PERIOD_MS = 10; // 100Hz feedback publish period
+const int64_t EXECUTOR_SPIN_TIMEOUT_NS = 0;      // Non-blocking spin for minimum latency
+const uint32_t WAITING_AGENT_PING_PERIOD_MS = 250;
+const uint32_t CONNECTED_AGENT_PING_PERIOD_MS = 1000;
+const uint32_t AGENT_PING_TIMEOUT_MS = 10;
+const uint8_t AGENT_PING_ATTEMPTS = 1;
 
 enum states
 {
@@ -103,7 +108,7 @@ void steering_feedback_timer_callback(rcl_timer_t *timer, int64_t last_call_time
 }
 
 // ============== Control Task running on Core 0 ==============
-// Handles both steering and brushless motor control at 10Hz
+// Handles both steering and brushless motor control at 100Hz
 void controlTask(void *pvParameters)
 {
   TickType_t xLastWakeTime = xTaskGetTickCount();
@@ -133,7 +138,7 @@ void controlTask(void *pvParameters)
       servoControl.setServoPulseWidth(0.0f); // Set steering to neutral
       logOutMutex(&throttleCommandMutex, "ControlTask");
     }
-    // Precise timing using vTaskDelayUntil for consistent 10Hz loop
+    // Precise timing using vTaskDelayUntil for consistent 100Hz loop
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(CONTROL_PERIOD_MS));
   }
 }
@@ -149,49 +154,42 @@ bool create_entities(void)
   RCCHECK(rclc_node_init_default(&node, "micro_ros_platformio_node", "", &support));
 
   // Create publisher for /steering_angle
-  RCCHECK(rclc_publisher_init_default(
+    RCCHECK(rclc_publisher_init_best_effort(
       &steering_angle_publisher,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
       "/steering_angle"));
 
   // Create subscription for /steering_command
-  RCCHECK(rclc_subscription_init_default(
+    RCCHECK(rclc_subscription_init_best_effort(
       &steering_command_subscriber,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
       "/steering_command"));
 
   // Create subscription for /throttle
-  RCCHECK(rclc_subscription_init_default(
+    RCCHECK(rclc_subscription_init_best_effort(
       &throttle_subscriber,
       &node,
       ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32),
       "/throttle"));
 
-  // Create steering feedback timer at 20Hz (50ms period) - runs on Core 1
-  const unsigned int feedback_timer_timeout = 50;
+    // Create steering feedback timer at 100Hz (10ms period) - runs on Core 1
   RCCHECK(rclc_timer_init_default(
       &steering_feedback_timer,
       &support,
-      RCL_MS_TO_NS(feedback_timer_timeout),
+      RCL_MS_TO_NS(STEERING_FEEDBACK_PERIOD_MS),
       steering_feedback_timer_callback));
 
-  // Create executors (all run on Core 1 with micro-ROS)
-  pub_executor = rclc_executor_get_zero_initialized_executor();
-  sub_executor = rclc_executor_get_zero_initialized_executor();
+    // Create executor (runs on Core 1 with micro-ROS)
+    ros_executor = rclc_executor_get_zero_initialized_executor();
 
-  // Publisher executor: 1 feedback timer = 1 handle
-  RCCHECK(rclc_executor_init(&pub_executor, &support.context, 1, &allocator));
-  // Subscriber executor: 2 subscriptions = 2 handles
-  RCCHECK(rclc_executor_init(&sub_executor, &support.context, 2, &allocator));
+    // 1 timer + 2 subscriptions
+    RCCHECK(rclc_executor_init(&ros_executor, &support.context, 3, &allocator));
 
-  // Add subscriptions to sub_executor
-  RCCHECK(rclc_executor_add_subscription(&sub_executor, &steering_command_subscriber, &steering_command_msg, steering_command_callback, ON_NEW_DATA));
-  RCCHECK(rclc_executor_add_subscription(&sub_executor, &throttle_subscriber, &throttle_msg, throttle_callback, ON_NEW_DATA));
-
-  // Add timer to pub_executor
-  RCCHECK(rclc_executor_add_timer(&pub_executor, &steering_feedback_timer));
+    RCCHECK(rclc_executor_add_subscription(&ros_executor, &steering_command_subscriber, &steering_command_msg, steering_command_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_subscription(&ros_executor, &throttle_subscriber, &throttle_msg, throttle_callback, ON_NEW_DATA));
+    RCCHECK(rclc_executor_add_timer(&ros_executor, &steering_feedback_timer));
 
   return true;
 }
@@ -207,8 +205,7 @@ void destroy_entities()
 
   rcl_timer_fini(&steering_feedback_timer);
 
-  rclc_executor_fini(&pub_executor);
-  rclc_executor_fini(&sub_executor);
+  rclc_executor_fini(&ros_executor);
   rcl_node_fini(&node);
   rclc_support_fini(&support);
 }
@@ -254,7 +251,7 @@ void loop()
   switch (state)
   {
   case WAITING_AGENT:
-    EXECUTE_EVERY_N_MS(500, state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_AVAILABLE : WAITING_AGENT;);
+    EXECUTE_EVERY_N_MS(WAITING_AGENT_PING_PERIOD_MS, state = (RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, AGENT_PING_ATTEMPTS)) ? AGENT_AVAILABLE : WAITING_AGENT;);
     break;
   case AGENT_AVAILABLE:
     state = (true == create_entities()) ? AGENT_CONNECTED : WAITING_AGENT;
@@ -264,12 +261,11 @@ void loop()
     };
     break;
   case AGENT_CONNECTED:
-    EXECUTE_EVERY_N_MS(200, state = (RMW_RET_OK == rmw_uros_ping_agent(100, 1)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;);
+    EXECUTE_EVERY_N_MS(CONNECTED_AGENT_PING_PERIOD_MS, state = (RMW_RET_OK == rmw_uros_ping_agent(AGENT_PING_TIMEOUT_MS, AGENT_PING_ATTEMPTS)) ? AGENT_CONNECTED : AGENT_DISCONNECTED;);
     if (state == AGENT_CONNECTED)
     {
-      // Spin executors - handles pub/sub on Core 1
-      RCSOFTCHECK(rclc_executor_spin_some(&pub_executor, RCL_MS_TO_NS(10)));
-      RCSOFTCHECK(rclc_executor_spin_some(&sub_executor, RCL_MS_TO_NS(10)));
+      // Spin executor in non-blocking mode for low-latency pub/sub handling
+      RCSOFTCHECK(rclc_executor_spin_some(&ros_executor, EXECUTOR_SPIN_TIMEOUT_NS));
     }
     break;
   case AGENT_DISCONNECTED:
@@ -279,6 +275,6 @@ void loop()
   default:
     break;
   }
-  // Small delay to yield to other tasks and prevent watchdog issues
-  vTaskDelay(pdMS_TO_TICKS(1));
+  // Yield CPU without adding fixed millisecond latency on each loop
+  taskYIELD();
 }
