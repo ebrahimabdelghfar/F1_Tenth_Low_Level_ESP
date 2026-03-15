@@ -12,6 +12,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from typing import List, Optional
 
 import rclpy
@@ -123,6 +124,8 @@ class MicroRosAgentLauncher(Node):
         self._device_path: Optional[str] = None
         self._retry_timer = None
         self._health_timer = None
+        self._is_shutting_down = False
+        self._shutdown_lock = threading.Lock()
 
         # ---- Resolve device & start ----
         if self._explicit_device:
@@ -144,6 +147,9 @@ class MicroRosAgentLauncher(Node):
     # ------------------------------------------------------------------
     def _try_detect_and_start(self) -> None:
         """Attempt to find an ESP32; schedule a retry timer if not found."""
+        if self._is_shutting_down:
+            return
+
         devices = self._detector.scan()
         if devices:
             self._device_path = devices[0]
@@ -167,6 +173,9 @@ class MicroRosAgentLauncher(Node):
                 )
 
     def _device_retry_callback(self) -> None:
+        if self._is_shutting_down:
+            return
+
         devices = self._detector.scan()
         if devices:
             self._device_path = devices[0]
@@ -196,6 +205,13 @@ class MicroRosAgentLauncher(Node):
 
     def _start_agent(self) -> None:
         """Launch the micro-ROS agent container."""
+        if self._is_shutting_down:
+            return
+
+        if not self._device_path:
+            self.get_logger().error("Cannot start micro-ROS agent: no device path set")
+            return
+
         # Stop any lingering container with the same name
         self._stop_container(quiet=True)
 
@@ -205,7 +221,8 @@ class MicroRosAgentLauncher(Node):
             self._agent_process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
             )
         except OSError as exc:
             self.get_logger().error(f"Failed to launch agent: {exc}")
@@ -219,24 +236,61 @@ class MicroRosAgentLauncher(Node):
 
     def _health_check_callback(self) -> None:
         """Restart the agent if the Docker process has exited unexpectedly."""
+        if self._is_shutting_down:
+            return
+
         if self._agent_process is None:
             return
 
         retcode = self._agent_process.poll()
         if retcode is not None:
-            stderr_tail = ""
-            if self._agent_process.stderr:
-                try:
-                    stderr_tail = self._agent_process.stderr.read().decode(
-                        errors="replace"
-                    )[-500:]
-                except Exception:
-                    pass
             self.get_logger().warn(
                 f"micro-ROS agent exited (code {retcode}). Restarting…"
-                + (f"\n  Last stderr: {stderr_tail}" if stderr_tail else "")
             )
+            self._agent_process = None
             self._start_agent()
+
+    def _cancel_timers(self) -> None:
+        for timer_name in ("_retry_timer", "_health_timer"):
+            timer = getattr(self, timer_name)
+            if timer is not None:
+                timer.cancel()
+                setattr(self, timer_name, None)
+
+    def _stop_agent_process(self, quiet: bool = False) -> None:
+        """Stop and reap the local docker client process if still running."""
+        process = self._agent_process
+        self._agent_process = None
+
+        if process is None:
+            return
+
+        if process.poll() is not None:
+            return
+
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except OSError as exc:
+            if not quiet:
+                self.get_logger().warn(f"Could not terminate agent process group: {exc}")
+
+        try:
+            process.wait(timeout=3)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+        if not quiet:
+            self.get_logger().warn("Agent did not stop on SIGTERM; sending SIGKILL")
+
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=2)
+        except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as exc:
+            if not quiet:
+                self.get_logger().warn(f"Failed to fully kill agent process group: {exc}")
 
     # ------------------------------------------------------------------
     # Cleanup
@@ -262,27 +316,16 @@ class MicroRosAgentLauncher(Node):
 
     def shutdown(self) -> None:
         """Gracefully shut down the agent and clean up resources."""
+        with self._shutdown_lock:
+            if self._is_shutting_down:
+                return
+            self._is_shutting_down = True
+
         self.get_logger().info("Shutting down micro-ROS agent launcher…")
-
-        # Cancel timers
-        for timer in (self._retry_timer, self._health_timer):
-            if timer is not None:
-                timer.cancel()
-
-        # Kill the subprocess immediately — no long waits
-        if self._agent_process is not None and self._agent_process.poll() is None:
-            self._agent_process.kill()          # SIGKILL — instant
-            self._agent_process.wait(timeout=2) # reap zombie
-
-        # Remove the container in the background so we don't block exit
-        try:
-            subprocess.Popen(
-                ["sudo", "docker", "rm", "-f", self._container_name],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except OSError:
-            pass
+        self._cancel_timers()
+        self._stop_agent_process(quiet=True)
+        self._stop_container(quiet=True)
+        self.get_logger().info("micro-ROS agent launcher shutdown complete")
 
 
 # ---------------------------------------------------------------------------
